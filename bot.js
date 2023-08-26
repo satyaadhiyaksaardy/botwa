@@ -1,4 +1,3 @@
-// Imports
 const OpenAIApi = require("openai").default;
 const dotenv = require("dotenv");
 const fs = require("fs");
@@ -8,73 +7,111 @@ dotenv.config();
 
 const { MY_NUMBER, DATA_FILE, OPENAI_API_KEY } = process.env;
 
-// WhatsApp Client Initialization
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    args: ["--no-sandbox"],
-    headless: true,
-  },
-});
+let gptContext = {};
 
-client.initialize();
-
-const openai = new OpenAIApi({
+// Initialize clients and data
+const whatsappClient = initializeWhatsAppClient();
+const openaiClient = new OpenAIApi({
   key: OPENAI_API_KEY,
   organization: "org-ievih6LsBjEbJfmo2FA0CEbP",
 });
+let store = loadData();
 
-// Data Handling
-let store = {};
-const gptContext = {};
+function initializeWhatsAppClient() {
+  const client = new Client({
+    authStrategy: new LocalAuth(),
+    puppeteer: { args: ["--no-sandbox"], headless: true },
+  });
+  client.initialize();
+  return client;
+}
 
 function loadData() {
   if (fs.existsSync(DATA_FILE)) {
-    const rawData = fs.readFileSync(DATA_FILE, "utf-8");
-    store = JSON.parse(rawData);
+    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
+    if (data.gptContext) {
+      gptContext = data.gptContext;
+    }
+    return data.store || {};
   }
+  return {};
 }
 
 function saveData() {
-  const jsonData = JSON.stringify(store, null, 4);
-  fs.writeFileSync(DATA_FILE, jsonData, "utf-8");
+  const fullData = {
+    store: store,
+    gptContext: gptContext,
+  };
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(fullData, null, 4), "utf-8");
+  } catch (error) {
+    console.error("Error saving data:", error);
+  }
 }
 
 function ensureUserStore(user) {
   if (!store[user]) {
-    store[user] = {
-      tasks: [],
-      expenses: [],
-    };
+    store[user] = { tasks: [], expenses: [], reminders: [] };
   }
 }
 
-loadData(); // Load data when the script runs
+async function processReminders(msg, sender) {
+  ensureUserStore(sender);
+  const args = msg.body.split(" ");
+  const command = args[0];
+  const time = args[1];
+  const reminder = args.slice(2).join(" ");
+
+  const [hours, minutes] = time.split(":");
+  const reminderTime = new Date();
+  reminderTime.setHours(parseInt(hours, 10));
+  reminderTime.setMinutes(parseInt(minutes, 10));
+  const timeDifference = reminderTime.getTime() - new Date().getTime();
+
+  if (timeDifference < 0) {
+    msg.reply(`Waktunya udah lewat bro. Coba set ulang.`);
+    return;
+  }
+
+  // Store the reminder
+  store[sender].reminders.push({
+    time: reminderTime.toISOString(),
+    message: reminder,
+  });
+  saveData(); // This persists the reminder to the data file.
+
+  setTimeout(() => {
+    msg.reply(`Oi, ingetin aja: ${reminder}. Jangan lupa ya, bro!`);
+    // Remove the reminder once it's triggered
+    store[sender].reminders = store[sender].reminders.filter(
+      (r) => r.message !== reminder
+    );
+    saveData();
+  }, timeDifference);
+
+  msg.reply(`Oke, gw ingetin nanti jam ${hours}:${minutes}.`);
+}
 
 async function provideInsights(data, user) {
-  // Construct a prompt using the saved data for analysis
-  let prompt = `Provide insights for the following expenses data: Expenses - ${JSON.stringify(
+  const prompt = `Provide insights, suggestion, and commentar for the following expenses data: Expenses - ${JSON.stringify(
     data[user].expenses
   )}`;
 
-  // Get insights from OpenAI
   try {
-    const gptResponse = await openai.chat.completions.create({
+    const gptResponse = await openaiClient.chat.completions.create({
       messages: [
         {
           role: "system",
           content:
-            "You are a cool whatsapp bot asking for insights that always reply in slang indonesian language. Reply any message you get in indonesian, forever.",
+            "You are a cool whatsapp bot assistant named 'Paijo' that always any message you get in slang indonesian language, forever.",
         },
-        {
-          role: "user",
-          content: prompt,
-        },
+        { role: "user", content: prompt },
       ],
       model: "gpt-3.5-turbo",
       temperature: 0.8,
       max_tokens: 500,
     });
+
     return gptResponse.choices[0].message.content.trim();
   } catch (error) {
     console.error("Error getting insights from OpenAI:", error);
@@ -82,12 +119,12 @@ async function provideInsights(data, user) {
   }
 }
 
-// Command Handling
 async function processCommands(msg, sender) {
   ensureUserStore(sender);
   const command = msg.body.split(" ")[0];
   const args = msg.body.substring(command.length).trim();
 
+  // Implement each command processing...
   switch (command) {
     case "/!kerjaan":
       if (args.startsWith("add ")) {
@@ -96,14 +133,16 @@ async function processCommands(msg, sender) {
         saveData();
         msg.reply(`Kerjaan udah ditambah, bro: ${task}. Yuk kerjain!`);
       } else if (args === "list") {
-        const tasks = store[sender].tasks.join("\n");
+        const tasks = store[sender].tasks
+          .map((task, idx) => `${idx + 1}. ${task}`)
+          .join("\n");
         msg.reply(
           tasks.length > 0
             ? `List kerjaan lo:\n${tasks}`
             : `Lo ga punya kerjaan. Santuy dulu!`
         );
       } else if (args.startsWith("delete ")) {
-        const index = parseInt(args.replace("delete ", ""), 10);
+        const index = parseInt(args.replace("delete ", ""), 10) - 1;
         if (index >= 0 && index < store[sender].tasks.length) {
           const deletedTask = store[sender].tasks.splice(index, 1);
           saveData();
@@ -133,7 +172,7 @@ async function processCommands(msg, sender) {
         }
       } else if (args === "list") {
         const expenses = store[sender].expenses
-          .map((exp, idx) => `${idx}. ${exp.name} - $${exp.amount}`)
+          .map((exp, idx) => `${idx + 1}. ${exp.name} - Rp${exp.amount}`)
           .join("\n");
         msg.reply(
           expenses.length > 0
@@ -141,12 +180,12 @@ async function processCommands(msg, sender) {
             : `Lo ga ada pengeluaran nih. Hemat banget!`
         );
       } else if (args.startsWith("delete ")) {
-        const index = parseInt(args.replace("delete ", ""), 10);
+        const index = parseInt(args.replace("delete ", ""), 10) - 1;
         if (index >= 0 && index < store[sender].expenses.length) {
           const deletedExpense = store[sender].expenses.splice(index, 1);
           saveData();
           msg.reply(
-            `Pengeluaran udah dihapus: ${deletedExpense[0].name} - $${deletedExpense[0].amount}. Uang lo aman!`
+            `Pengeluaran udah dihapus: ${deletedExpense[0].name} - Rp${deletedExpense[0].amount}. Uang lo aman!`
           );
         } else {
           msg.reply(`Nomor pengeluaran salah tuh. Coba lagi.`);
@@ -164,17 +203,34 @@ async function processCommands(msg, sender) {
         msg.reply(`Command pengeluaran salah tuh. Cek lagi deh.`);
       }
       break;
+    case "/!ingetin":
+      processReminders(msg, sender);
+      break;
     case "/!gpt":
       if (args === "reset") {
         delete gptContext[sender];
+        saveData();
         msg.reply("Chat context udah direset. Mulai dari awal lagi!");
       } else {
-        if (!gptContext[sender]) gptContext[sender] = [];
+        if (!gptContext[sender]) {
+          gptContext[sender] = [];
+        }
 
-        gptContext[sender].push({ role: "user", content: args });
+        // Add the received message to the context
+        gptContext[sender].push({
+          role: "system",
+          content:
+            "You are a helpful assistant named 'Paijo'. You always reply to any message you get in slang indonesian language, forever.",
+        });
+        gptContext[sender].push({ role: "user", content: msg.body });
+
+        // Ensure context doesn't grow too long (you can adjust the number based on your needs)
+        if (gptContext[sender].length > 5) {
+          gptContext[sender].shift(); // remove the oldest message
+        }
 
         try {
-          const gptResponse = await openai.chat.completions.create({
+          const gptResponse = await openaiClient.chat.completions.create({
             messages: gptContext[sender],
             model: "gpt-3.5-turbo",
             temperature: 0.8,
@@ -192,21 +248,22 @@ async function processCommands(msg, sender) {
       break;
     case "/!help":
       msg.reply(
-        `Yo, berikut ini daftar perintah yang bisa lo pake:
-- */!kerjaan add [tugas]*: Tambah kerjaan baru.
-- */!kerjaan list*: Lihat daftar kerjaan lo.
-- */!kerjaan delete [nomor]*: Hapus kerjaan dengan nomor tertentu.
-
-- */!pengeluaran add [nama] | [jumlah]*: Catat pengeluaran baru.
-- */!pengeluaran list*: Lihat semua pengeluaran lo.
-- */!pengeluaran delete [nomor]*: Hapus pengeluaran dengan nomor tertentu.
-- */!pengeluaran summary*: Lihat total pengeluaran lo.
-- */!pengeluaran insight*: Dapetin insight dari pengeluaran lo.
-
-- */!gpt [pesan]*: Ngobrol dengan OpenAI. 
-- */!gpt reset*: Reset konteks chat.
-
-Mau tau lebih lanjut? Tanya aja!`
+        `Yow! Ini daftar perintah yang bisa loe gunain:
+      - */!kerjaan add [tugas]*: Mau nambah kerjaan baru? Gampang, pake ini!
+      - */!kerjaan list*: Pengen lihat kerjaan yang harus loe kerjain? Pake aja ini.
+      - */!kerjaan delete [nomor]*: Kalau udah kelar kerjaan, atau mau hapus, pake ini.
+      
+      - */!pengeluaran add [nama] | [jumlah]*: Abis boros? Catet pengeluaran loe pake ini.
+      - */!pengeluaran list*: Mau liat berapa borosnya loe? Cek daftar pengeluaran loe di sini.
+      - */!pengeluaran delete [nomor]*: Salah catet? Gampang, hapus aja pake ini.
+      - */!pengeluaran summary*: Pengen tau total pengeluaran loe? Cek di sini.
+      - */!pengeluaran insight*: Pengen dapet insight atau masukan soal pengeluaran loe? Loe bisa cek di sini.
+      
+      - */!ingetin [jam:menit] [pesan]*: Mau diingetin sesuatu? Biar Paijo yang ingetin loe!
+      - */!gpt [pesan]*: Mau ngobrol santai sama Paijo? Tulis pesan loe di sini.
+      - */!gpt reset*: Chat udah panjang atau loe mau mulai dari awal? Reset aja pake ini.
+      
+      Mau tau lebih lanjut? Tanya aja ke Paijo, bro!`
       );
       break;
     // Add more command cases as needed...
@@ -215,51 +272,43 @@ Mau tau lebih lanjut? Tanya aja!`
   }
 }
 
-// Event Listeners
-client.on("loading_screen", (percent, message) => {
+// Event listeners
+whatsappClient.on("loading_screen", (percent, message) => {
   console.log("LOADING SCREEN", percent, message);
 });
 
-client.on("qr", (qr) => {
-  // NOTE: This event will not be fired if a session is specified.
+whatsappClient.on("qr", (qr) => {
   Qrcode.generate(qr, { small: true });
 });
 
-client.on("authenticated", () => {
+whatsappClient.on("authenticated", () => {
   console.log("AUTHENTICATED");
 });
 
-client.on("auth_failure", (msg) => {
-  // Fired if session restore was unsuccessful
+whatsappClient.on("auth_failure", (msg) => {
   console.error("AUTHENTICATION FAILURE", msg);
 });
 
-client.on("ready", () => {
+whatsappClient.on("ready", () => {
   console.log("READY");
 });
 
-client.on("message_create", async (msg) => {
-  if (msg.from !== "status@broadcast" && !msg.hasQuotedMsg) {
-    console.log("MESSAGE RECEIVED", msg);
-    await processCommands(msg, msg.from);
-  }
+whatsappClient.on("message_create", async (msg) => {
+  if (msg.from === "status@broadcast" || msg.hasQuotedMsg || !msg.fromMe)
+    return;
+
+  console.log("MESSAGE RECEIVED", msg);
+  await processCommands(msg, msg.from);
 });
 
-client.on("message_revoke_everyone", async (after, before) => {
-  // Avoid processing for 'status@broadcast' and quoted messages
-  if (after.from === "status@broadcast" || after.hasQuotedMsg) {
-    return;
-  }
-  // Fired whenever a message is deleted by anyone (including you)
+whatsappClient.on("message_revoke_everyone", async (after, before) => {
+  if (after.from === "status@broadcast" || after.hasQuotedMsg) return;
 
-  // Send the message after it was deleted to yourself
   client.sendMessage(
     MY_NUMBER,
     `Message deleted in chat ${after.from}: ${after.body}`
   );
-
   if (before) {
-    // Send the message before it was deleted to yourself
     client.sendMessage(
       MY_NUMBER,
       `Original message in chat ${before.from}: ${before.body}`
