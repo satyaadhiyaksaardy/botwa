@@ -1,60 +1,19 @@
+const {
+  store,
+  gptContext,
+  listeningChats,
+  ensureUserStore,
+  saveData,
+} = require("./dataManager");
 const OpenAIApi = require("openai").default;
-const dotenv = require("dotenv");
-const fs = require("fs");
-const { Client, Qrcode, LocalAuth } = require("./index");
+const { OPENAI_API_KEY } = require("./config");
 
-dotenv.config();
-
-const { MY_NUMBER, DATA_FILE, OPENAI_API_KEY } = process.env;
-
-let gptContext = {};
-
-// Initialize clients and data
-const whatsappClient = initializeWhatsAppClient();
 const openaiClient = new OpenAIApi({
   key: OPENAI_API_KEY,
   organization: "org-ievih6LsBjEbJfmo2FA0CEbP",
 });
-let store = loadData();
 
-function initializeWhatsAppClient() {
-  const client = new Client({
-    authStrategy: new LocalAuth(),
-    puppeteer: { args: ["--no-sandbox"], headless: true },
-  });
-  client.initialize();
-  return client;
-}
-
-function loadData() {
-  if (fs.existsSync(DATA_FILE)) {
-    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf-8"));
-    if (data.gptContext) {
-      gptContext = data.gptContext;
-    }
-    return data.store || {};
-  }
-  return {};
-}
-
-function saveData() {
-  const fullData = {
-    store: store,
-    gptContext: gptContext,
-  };
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(fullData, null, 4), "utf-8");
-  } catch (error) {
-    console.error("Error saving data:", error);
-  }
-}
-
-function ensureUserStore(user) {
-  if (!store[user]) {
-    store[user] = { tasks: [], expenses: [], reminders: [] };
-  }
-}
-
+// processReminders, provideInsights, processCommands
 async function processReminders(msg, sender) {
   ensureUserStore(sender);
   const args = msg.body.split(" ");
@@ -81,7 +40,7 @@ async function processReminders(msg, sender) {
   saveData(); // This persists the reminder to the data file.
 
   setTimeout(() => {
-    msg.reply(`Oi, ingetin aja: ${reminder}. Jangan lupa ya, bro!`);
+    msg.reply(`Oi, mau ngingetin aja: ${reminder}. Jangan lupa ya, bro!`);
     // Remove the reminder once it's triggered
     store[sender].reminders = store[sender].reminders.filter(
       (r) => r.message !== reminder
@@ -115,14 +74,24 @@ async function provideInsights(data, user) {
     return gptResponse.choices[0].message.content.trim();
   } catch (error) {
     console.error("Error getting insights from OpenAI:", error);
-    return "Sorry, unable to provide insights at the moment.";
+    return "Wah maap, gabisa kasih insights sekarang.";
   }
 }
 
 async function processCommands(msg, sender) {
   ensureUserStore(sender);
+
+  const contact = await msg.getContact();
   const command = msg.body.split(" ")[0];
   const args = msg.body.substring(command.length).trim();
+
+  // Capture messages if listening mode is active for this sender
+  if (listeningChats[msg.id.remote]) {
+    listeningChats[msg.id.remote].push(
+      "<start>" + contact.pushname ?? sender + ": " + msg.body + "<end>"
+    );
+    saveData();
+  }
 
   // Implement each command processing...
   switch (command) {
@@ -212,20 +181,22 @@ async function processCommands(msg, sender) {
         saveData();
         msg.reply("Chat context udah direset. Mulai dari awal lagi!");
       } else {
-        if (!gptContext[sender]) {
-          gptContext[sender] = [];
+        if (!gptContext[sender] || gptContext[sender].length === 0) {
+          gptContext[sender] = [
+            {
+              role: "system",
+              content:
+                "You are a helpful assistant named 'Paijo'. You always reply to any message you get in slang indonesian language, forever.",
+            },
+          ];
         }
 
         // Add the received message to the context
-        gptContext[sender].push({
-          role: "system",
-          content:
-            "You are a helpful assistant named 'Paijo'. You always reply to any message you get in slang indonesian language, forever.",
-        });
         gptContext[sender].push({ role: "user", content: msg.body });
+        saveData();
 
         // Ensure context doesn't grow too long (you can adjust the number based on your needs)
-        if (gptContext[sender].length > 5) {
+        if (gptContext[sender].length > 10) {
           gptContext[sender].shift(); // remove the oldest message
         }
 
@@ -239,6 +210,7 @@ async function processCommands(msg, sender) {
 
           const reply = gptResponse.choices[0].message.content.trim();
           gptContext[sender].push({ role: "assistant", content: reply });
+          saveData();
           msg.reply(reply);
         } catch (error) {
           console.error("Error chatting with OpenAI:", error);
@@ -248,23 +220,39 @@ async function processCommands(msg, sender) {
       break;
     case "/!help":
       msg.reply(
-        `Yow! Ini daftar perintah yang bisa loe gunain:
-      - */!kerjaan add [tugas]*: Mau nambah kerjaan baru? Gampang, pake ini!
-      - */!kerjaan list*: Pengen lihat kerjaan yang harus loe kerjain? Pake aja ini.
-      - */!kerjaan delete [nomor]*: Kalau udah kelar kerjaan, atau mau hapus, pake ini.
-      
-      - */!pengeluaran add [nama] | [jumlah]*: Abis boros? Catet pengeluaran loe pake ini.
-      - */!pengeluaran list*: Mau liat berapa borosnya loe? Cek daftar pengeluaran loe di sini.
-      - */!pengeluaran delete [nomor]*: Salah catet? Gampang, hapus aja pake ini.
-      - */!pengeluaran summary*: Pengen tau total pengeluaran loe? Cek di sini.
-      - */!pengeluaran insight*: Pengen dapet insight atau masukan soal pengeluaran loe? Loe bisa cek di sini.
-      
-      - */!ingetin [jam:menit] [pesan]*: Mau diingetin sesuatu? Biar Paijo yang ingetin loe!
-      - */!gpt [pesan]*: Mau ngobrol santai sama Paijo? Tulis pesan loe di sini.
-      - */!gpt reset*: Chat udah panjang atau loe mau mulai dari awal? Reset aja pake ini.
-      
-      Mau tau lebih lanjut? Tanya aja ke Paijo, bro!`
+        `Wassup, bro! Ini daftar perintah yang bisa loe pake:
+    
+- **Kerjaan lo**:
+  - */!kerjaan add [tugas]*: Mau nambah kerjaan baru? Pake ini.
+  - */!kerjaan list*: Pengen lihat kerjaan yang belum loe kerjain? Pake aja ini.
+  - */!kerjaan delete [nomor]*: Udah kelar atau salah input? Hapus aja pake ini.
+
+- **Pengeluaran lo**:
+  - */!pengeluaran add [nama] | [jumlah]*: Catet borosan loe pake ini.
+  - */!pengeluaran list*: Pengen cek borosan loe? Cek sini.
+  - */!pengeluaran delete [nomor]*: Salah catet? No worries, hapus aja.
+  - */!pengeluaran summary*: Mau tau total pengeluaran? Cek di sini.
+  - */!pengeluaran insight*: Pengen insight soal duit loe? Pake ini.
+
+- **Reminder**:
+  - */!ingetin [jam:menit] [pesan]*: Mau diingetin sesuatu? Biar Paijo yang urus!
+
+- **Ngobrol santai**:
+  - */!gpt [pesan]*: Pengen curhat atau tanya-tanya? Sini ngobrol.
+  - */!gpt reset*: Mau mulai dari awal lagi? Reset chat di sini.
+
+- **Nyimak obrolan**:
+  - */!startlistening*: Paijo mulai nyimak obrolan lo.
+  - */!stoplistening*: Paijo berhenti nyimak dan rangkum obrolan.
+
+Paijo siap membantu loe! Jangan sungkan buat tanya apa aja, ok?`
       );
+      break;
+    case "/!startlistening":
+      msg.reply(await startListening(msg.id.remote));
+      break;
+    case "/!stoplistening":
+      msg.reply(await stopListening(msg.id.remote));
       break;
     // Add more command cases as needed...
     default:
@@ -272,46 +260,52 @@ async function processCommands(msg, sender) {
   }
 }
 
-// Event listeners
-whatsappClient.on("loading_screen", (percent, message) => {
-  console.log("LOADING SCREEN", percent, message);
-});
+async function startListening(chatId) {
+  listeningChats[chatId] = [];
+  saveData();
+  return "Siyapp, mulai nyimak nih. Ntar ku kasih notulennya...";
+}
 
-whatsappClient.on("qr", (qr) => {
-  Qrcode.generate(qr, { small: true });
-});
+async function stopListening(chatId) {
+  const messages = listeningChats[chatId];
+  const summary = await summarizeChat(messages);
+  delete listeningChats[chatId];
+  saveData();
+  return summary;
+}
 
-whatsappClient.on("authenticated", () => {
-  console.log("AUTHENTICATED");
-});
+async function summarizeChat(messages) {
+  const formattedChat = messages.map((msg) => msg).join("\n");
+  const prompt = `${formattedChat}`;
 
-whatsappClient.on("auth_failure", (msg) => {
-  console.error("AUTHENTICATION FAILURE", msg);
-});
+  const gptResponse = await openaiClient.chat.completions.create({
+    messages: [
+      {
+        role: "system",
+        content: `You will be provided with group chat discussion, and your task is to summarize the discussion as follows:
+          
+          -Overall summary of discussion
+          -Action items (what needs to be done and who is doing it)
+          -If applicable, a list of topics that need to be discussed more fully in the next discussion.
 
-whatsappClient.on("ready", () => {
-  console.log("READY");
-});
+          You are always reply in indonesian language, forever.`,
+      },
+      { role: "user", content: prompt },
+    ],
+    model: "gpt-3.5-turbo",
+    temperature: 0.8,
+    max_tokens: 2000,
+  });
 
-whatsappClient.on("message_create", async (msg) => {
-  if (msg.from === "status@broadcast" || msg.hasQuotedMsg || !msg.fromMe)
-    return;
+  return gptResponse.choices[0].message.content.trim();
+}
 
-  console.log("MESSAGE RECEIVED", msg);
-  await processCommands(msg, msg.from);
-});
-
-whatsappClient.on("message_revoke_everyone", async (after, before) => {
-  if (after.from === "status@broadcast" || after.hasQuotedMsg) return;
-
-  client.sendMessage(
-    MY_NUMBER,
-    `Message deleted in chat ${after.from}: ${after.body}`
-  );
-  if (before) {
-    client.sendMessage(
-      MY_NUMBER,
-      `Original message in chat ${before.from}: ${before.body}`
-    );
-  }
-});
+module.exports = {
+  processReminders,
+  provideInsights,
+  processCommands,
+  startListening,
+  stopListening,
+  summarizeChat,
+  // ... and so on
+};
