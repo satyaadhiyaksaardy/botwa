@@ -1,4 +1,5 @@
 const {
+  settings,
   store,
   gptContext,
   listeningChats,
@@ -6,7 +7,7 @@ const {
   saveData,
 } = require("./dataManager");
 const OpenAIApi = require("openai").default;
-const { OPENAI_API_KEY } = require("./config");
+const { OPENAI_API_KEY, MY_NUMBER } = require("./config");
 
 const openaiClient = new OpenAIApi({
   key: OPENAI_API_KEY,
@@ -66,7 +67,7 @@ async function provideInsights(data, user) {
         },
         { role: "user", content: prompt },
       ],
-      model: "gpt-3.5-turbo",
+      model: "gpt-4",
       temperature: 0.8,
       max_tokens: 500,
     });
@@ -78,19 +79,25 @@ async function provideInsights(data, user) {
   }
 }
 
-async function processCommands(msg, sender) {
+async function processCommands(msg, sender, info) {
   ensureUserStore(sender);
 
-  const contact = await msg.getContact();
   const command = msg.body.split(" ")[0];
+  const contact = await msg.getContact();
   const args = msg.body.substring(command.length).trim();
 
   // Capture messages if listening mode is active for this sender
-  if (listeningChats[msg.id.remote]) {
+  if (listeningChats[msg.id.remote] && command !== "/!stoplistening") {
     listeningChats[msg.id.remote].push(
-      "<start>" + contact.pushname ?? sender + ": " + msg.body + "<end>"
+      `<start>${contact.pushname ?? sender}: ${msg.body}<end>`
     );
     saveData();
+  }
+
+  if (settings.isAdminMode) {
+    if (msg.from === "status@broadcast" || !msg.fromMe) return;
+  } else {
+    if (msg.from === "status@broadcast") return;
   }
 
   // Implement each command processing...
@@ -177,39 +184,173 @@ async function processCommands(msg, sender) {
       break;
     case "/!gpt":
       if (args === "reset") {
-        delete gptContext[sender];
+        delete gptContext[msg.id.remote];
         saveData();
         msg.reply("Chat context udah direset. Mulai dari awal lagi!");
       } else {
-        if (!gptContext[sender] || gptContext[sender].length === 0) {
-          gptContext[sender] = [
+        if (
+          !gptContext[msg.id.remote] ||
+          gptContext[msg.id.remote].length === 0
+        ) {
+          gptContext[msg.id.remote] = [
             {
               role: "system",
               content:
-                "You are a helpful assistant named 'Paijo'. You always reply to any message you get in slang indonesian language, forever.",
+                "You are a helpful assistant named 'Raden Mas Paijo Noto Boto Sedoso Tibo Limo Penguoso Sak Jagat Royo' or 'Paijo'. Your boss is 'Satya Adhiyaksa Ardy' the most handsome being in the universe. You always reply to any message you get in slang indonesian language, forever. Your reply is always start straight with the response without any prefix. You are chatting with many people, each user name is in prefix of the message.",
             },
           ];
         }
 
         // Add the received message to the context
-        gptContext[sender].push({ role: "user", content: msg.body });
+        gptContext[msg.id.remote].push({
+          role: "user",
+          content: (contact.pushname ?? info.pushname) + ": " + args,
+        });
         saveData();
 
         // Ensure context doesn't grow too long (you can adjust the number based on your needs)
-        if (gptContext[sender].length > 10) {
-          gptContext[sender].shift(); // remove the oldest message
+        // save the system message
+        const systemMessage = gptContext[msg.id.remote][0];
+
+        while (gptContext[msg.id.remote].length > 10) {
+          // Remove the second item (oldest message excluding the system message)
+          gptContext[msg.id.remote].splice(1, 1);
+
+          // Check if the system message was removed, if so, add it back at the start
+          if (gptContext[msg.id.remote][0] !== systemMessage) {
+            gptContext[msg.id.remote].unshift(systemMessage);
+          }
+
+          saveData();
         }
 
         try {
           const gptResponse = await openaiClient.chat.completions.create({
-            messages: gptContext[sender],
-            model: "gpt-3.5-turbo",
+            messages: gptContext[msg.id.remote],
+            model: "gpt-4",
             temperature: 0.8,
-            max_tokens: 300,
+            max_tokens: 2000,
           });
 
           const reply = gptResponse.choices[0].message.content.trim();
-          gptContext[sender].push({ role: "assistant", content: reply });
+          gptContext[msg.id.remote].push({ role: "assistant", content: reply });
+          saveData();
+          msg.reply(reply);
+        } catch (error) {
+          console.error("Error chatting with OpenAI:", error);
+          msg.reply("Sorry, ga bisa ngobrol sekarang.");
+        }
+      }
+      break;
+    case "/!ceksoal":
+      if (args === "reset") {
+        delete store[sender].questions;
+        saveData();
+        msg.reply("Konteks soal udah direset. Mulai dari awal lagi!");
+      } else {
+        if (!store[sender].questions || store[sender].questions.length === 0) {
+          store[sender].questions = [
+            {
+              role: "system",
+              content: `You are helpful assistant. Your job is to check the question based on Bloom's Revised Taxonomy. You will given question and target category. If the question is not in the target category, you will reply with the question in the target category and the explanation. If the question is in the target category, you will reply with the question itself. Use this format for replying: [question] | [category] | [explanation]. You always reply to any message you get in indonesian language.
+                `,
+            },
+          ];
+        }
+
+        // Add the received message to the context
+        store[sender].questions.push({
+          role: "user",
+          content: args,
+        });
+        saveData();
+
+        // Ensure context doesn't grow too long (you can adjust the number based on your needs)
+        // save the system message
+        const systemMessage = store[sender].questions[0];
+
+        while (store[sender].questions.length > 10) {
+          // Remove the second item (oldest message excluding the system message)
+          store[sender].questions.splice(1, 1);
+
+          // Check if the system message was removed, if so, add it back at the start
+          if (store[sender].questions[0] !== systemMessage) {
+            store[sender].questions.unshift(systemMessage);
+          }
+
+          saveData();
+        }
+
+        try {
+          const gptResponse = await openaiClient.chat.completions.create({
+            messages: store[sender].questions,
+            model: "gpt-4",
+            temperature: 0.2,
+            max_tokens: 2000,
+          });
+
+          const reply = gptResponse.choices[0].message.content.trim();
+          store[sender].questions.push({ role: "assistant", content: reply });
+          saveData();
+          msg.reply(reply);
+        } catch (error) {
+          console.error("Error chatting with OpenAI:", error);
+          msg.reply("Sorry, ga bisa ngobrol sekarang.");
+        }
+      }
+      break;
+    case "/!buatsoal":
+      if (args === "reset") {
+        delete store[sender].questions;
+        saveData();
+        msg.reply("Konteks soal udah direset. Mulai dari awal lagi!");
+      } else {
+        if (!store[sender].questions || store[sender].questions.length === 0) {
+          store[sender].questions = [
+            {
+              role: "system",
+              content: `You are helpful assistant. Your job is to make question based on Bloom's Revised Taxonomy. You will given question material, target grade, number of question requested, and question type. You always reply to any message you get in indonesian language. Use this format for replying: 
+              [material] [for grade] :
+              [number] [question] | [Bloom's Revised Taxonomy category].
+              Kunci jawaban: [answer]
+                  `,
+            },
+          ];
+        }
+
+        // Add the received message to the context
+        store[sender].questions.push({
+          role: "user",
+          content: args,
+        });
+        saveData();
+
+        // Ensure context doesn't grow too long (you can adjust the number based on your needs)
+        // save the system message
+        const systemMessage = store[sender].questions[0];
+
+        while (store[sender].questions.length > 10) {
+          // Remove the second item (oldest message excluding the system message)
+          store[sender].questions.splice(1, 1);
+
+          // Check if the system message was removed, if so, add it back at the start
+          if (store[sender].questions[0] !== systemMessage) {
+            store[sender].questions.unshift(systemMessage);
+          }
+
+          saveData();
+        }
+
+        try {
+          const gptResponse = await openaiClient.chat.completions.create({
+            messages: store[sender].questions,
+            model: "gpt-4",
+            temperature: 0.2,
+            max_tokens: 2000,
+          });
+
+          const reply = gptResponse.choices[0].message.content.trim();
+          store[sender].questions.push({ role: "assistant", content: reply });
           saveData();
           msg.reply(reply);
         } catch (error) {
@@ -254,6 +395,32 @@ Paijo siap membantu loe! Jangan sungkan buat tanya apa aja, ok?`
     case "/!stoplistening":
       msg.reply(await stopListening(msg.id.remote));
       break;
+    case "/!adminmode":
+      if (sender === MY_NUMBER) {
+        if (settings.isAdminMode) {
+          settings.isAdminMode = false;
+          msg.reply("Admin mode udah dimatikan.");
+        } else {
+          settings.isAdminMode = true;
+          msg.reply("Admin mode udah dinyalain.");
+        }
+        saveData();
+      } else {
+        msg.reply("Loe bukan Bos gua Bro, jangan nyuruh nyuruh");
+      }
+      break;
+    case "/!sticker":
+      if (msg.hasMedia) {
+        const media = await msg.downloadMedia();
+        msg.reply(media, null, {
+          sendMediaAsSticker: true,
+          stickerAuthor: "Paijo",
+          stickerName: "Dibuat pake cinta",
+        });
+      } else {
+        msg.reply("Gambar stickernya mana bro?");
+      }
+      break;
     // Add more command cases as needed...
     default:
       break;
@@ -275,25 +442,23 @@ async function stopListening(chatId) {
 }
 
 async function summarizeChat(messages) {
-  const formattedChat = messages.map((msg) => msg).join("\n");
-  const prompt = `${formattedChat}`;
+  const prompt = messages.join("\n");
 
   const gptResponse = await openaiClient.chat.completions.create({
     messages: [
       {
         role: "system",
-        content: `You will be provided with group chat discussion, and your task is to summarize the discussion as follows:
-          
-          -Overall summary of discussion
-          -Action items (what needs to be done and who is doing it)
-          -If applicable, a list of topics that need to be discussed more fully in the next discussion.
+        content: `You will be provided with group chat discussion. Each message from user is inside <start> and <end> tag. Your task is to summarize the discussion as follows:
+-Overall summary of discussion
+-Action items (what needs to be done and who is doing it)
+-If applicable, a list of topics that need to be discussed more fully in the next discussion.
 
-          You are always reply in indonesian language, forever.`,
+You are always reply in indonesian language, forever.`,
       },
       { role: "user", content: prompt },
     ],
-    model: "gpt-3.5-turbo",
-    temperature: 0.8,
+    model: "gpt-4",
+    temperature: 0.2,
     max_tokens: 2000,
   });
 
