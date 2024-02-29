@@ -1,4 +1,4 @@
-const { Client, LocalAuth } = require("./initial");
+const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const { MY_NUMBER } = require("./config");
 const { processCommands } = require("./commandsProcessor");
@@ -31,11 +31,12 @@ whatsappClient.on("ready", () => {
 
 whatsappClient.on("message_create", async (msg) => {
   const info = whatsappClient.info;
-  await processCommands(msg, msg.from, info);
+  const client = whatsappClient;
+  await processCommands(msg, msg.from, info, client);
 });
 
 whatsappClient.on("message_revoke_everyone", async (after, before) => {
-  if (after.from === "status@broadcast" || after.hasQuotedMsg) return;
+  if (after.from === "status@broadcast") return;
 
   if (before) {
     whatsappClient.sendMessage(

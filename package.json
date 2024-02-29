@@ -10,11 +10,15 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "axios": "^1.5.0",
     "chatgpt": "^5.2.5",
     "chatgpt-official": "^1.1.9",
     "dotenv": "^16.3.1",
+    "form-data": "^4.0.0",
+    "google-auth-library": "^9.4.2",
+    "google-spreadsheet": "^4.1.1",
     "openai": "^4.2.0",
     "qrcode-terminal": "^0.12.0",
-    "whatsapp-web.js": "^1.22.2-alpha.0"
+    "whatsapp-web.js": "github:pedroslopez/whatsapp-web.js"
   }
 }
