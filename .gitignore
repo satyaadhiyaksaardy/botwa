@@ -1,0 +1,9 @@
+!.gitignore
+node_modules
+data.json
+db.json
+session
+.env
+!.env.example
+auth/*.json
+.wwebjs*

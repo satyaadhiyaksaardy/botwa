@@ -1,7 +1,7 @@
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode-terminal");
 const { MY_NUMBER } = require("./config");
-const { processCommands } = require("./commandsProcessor");
+const { processCommands } = require("./commands/processCommands");
 
 const whatsappClient = new Client({
   authStrategy: new LocalAuth(),
@@ -31,22 +31,18 @@ whatsappClient.on("ready", () => {
 
 whatsappClient.on("message_create", async (msg) => {
   const info = whatsappClient.info;
-  const client = whatsappClient;
-  await processCommands(msg, msg.from, info, client);
+  const sender = msg.from;
+  await processCommands(msg, sender, info, whatsappClient);
 });
 
 whatsappClient.on("message_revoke_everyone", async (after, before) => {
   if (after.from === "status@broadcast") return;
 
-  if (before) {
-    whatsappClient.sendMessage(
-      MY_NUMBER,
-      `Message deleted in chat *${whatsappClient.info.pushname}*
-
-Original message in chat : 
-${before.body}`
-    );
-  }
+  // Notify the user that a message was deleted from where it was sent and send the original message to the admin. get from contact name
+  const contact = await whatsappClient.getContactById(after.from);
+  const sender = contact.pushname ?? after.from;
+  const message = `Pesan dari ${sender} dihapus: ${before.body}`;
+  whatsappClient.sendMessage(MY_NUMBER, message);
 });
 
 whatsappClient.initialize();

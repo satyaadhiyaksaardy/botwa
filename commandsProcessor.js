@@ -567,6 +567,32 @@ async function handleAddGroup(msg, sender, args, client) {
   });
 }
 
+async function handleBroadcast(msg, sender, args, client) {
+  const spreadsheetUrl = args;
+
+  if (sender !== MY_NUMBER) {
+    msg.reply("Kamu gapunya akses buat broadcast bwang.");
+    return;
+  }
+
+  // Parse the Google Sheet ID from the URL
+  const parts = spreadsheetUrl.split("/");
+  const spreadsheetIdIndex = parts.findIndex((part) => part === "d") + 1;
+  const spreadsheetId = parts[spreadsheetIdIndex];
+  const broadcastData = await parseBroadcast(spreadsheetId);
+
+  msg.react("⏳");
+
+  broadcastData.number.forEach((number, index) => {
+    // add delay 10 seconds per message to avoid ban
+    setTimeout(() => {
+      client.sendMessage(number, broadcastData.message[index]);
+    }, index * 10000);
+  });
+
+  msg.react("👍");
+}
+
 async function processCommands(msg, sender, info, client) {
   ensureUserStore(sender);
 
@@ -641,6 +667,9 @@ async function processCommands(msg, sender, info, client) {
       break;
     case "/!add-group":
       handleAddGroup(msg, sender, args, client);
+      break;
+    case "/!broadcast":
+      handleBroadcast(msg, sender, args, client);
       break;
     default:
       break;
@@ -737,6 +766,34 @@ async function parseSpreadsheet(spreadsheetId) {
     newParticipants.push(rows[i].get("No. WA") + "@c.us");
   }
   return newParticipants;
+}
+
+async function parseBroadcast(spreadsheetId) {
+  const creds = require("./auth/googleSheetCredentials.json");
+  const SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.file",
+  ];
+
+  const jwt = new JWT({
+    email: creds.client_email,
+    key: creds.private_key,
+    scopes: SCOPES,
+  });
+  const doc = new GoogleSpreadsheet(spreadsheetId, jwt);
+  await doc.loadInfo();
+
+  const sheet = doc.sheetsByIndex[0];
+  const rows = await sheet.getRows();
+  let broadcastData = {
+    number: [],
+    message: [],
+  };
+  for (let i = 0; i < rows.length; i++) {
+    broadcastData.number.push(rows[i].get("No. WA") + "@c.us");
+    broadcastData.message.push(rows[i].get("Message"));
+  }
+  return broadcastData;
 }
 
 module.exports = {
