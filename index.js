@@ -42,7 +42,7 @@ whatsappClient.on("message_revoke_everyone", async (after, before) => {
   const contact = await whatsappClient.getContactById(before.from);
   const sender = contact.pushname ?? before.from;
   const message = before.body;
-  const chatId = before.chatId._serialized;
+  const chatId = before.id.id;
   const chat = await whatsappClient.getChatById(chatId);
   const chatName = chat.isGroup ? chat.name : sender;
 
