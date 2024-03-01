@@ -45,6 +45,9 @@ async function handleHelp(msg) {
     
     - *Dapetin Chat ID*:
       - /!chat-id: Nyari tau ID chat.
+      
+    - *Broadcast*:
+      - /!broadcast [SpreadsheetURL]: Kirim pesan ke banyak nomor.
   
   Paijo siap membantu loe! Jangan sungkan buat tanya apa aja, ok?`
   );

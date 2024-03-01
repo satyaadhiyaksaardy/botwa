@@ -25,6 +25,7 @@ async function processCommands(msg, sender, info, client) {
   ensureUserStore(sender);
   const command = msg.body.split(" ")[0];
   const args = msg.body.substring(command.length).trim();
+  const contact = await whatsappClient.getContactById(msg.from);
 
   if (listeningChats[msg.id.remote] && command !== "/!stoplistening") {
     listeningChats[msg.id.remote].push(
@@ -39,7 +40,7 @@ async function processCommands(msg, sender, info, client) {
     if (msg.from === "status@broadcast") return;
   }
 
-  console.log("Sender", sender + ":", msg.body);
+  console.log("Sender", contact.pushname ?? sender + ":", msg.body);
 
   // Routing commands to their handlers
   switch (command) {
