@@ -40,7 +40,12 @@ async function processCommands(msg, sender, info, client) {
     if (msg.from === "status@broadcast") return;
   }
 
-  console.log("Sender", contact.pushname ?? sender + ":", msg.body);
+  // log the message from group or contact. get from contact name or if group, get from group name. add timestamp
+  const chat = await client.getChatById(msg.id.remote);
+  const chatName = chat.isGroup ? chat.name : contact.pushname ?? sender;
+  console.log(
+    `${new Date().toLocaleString()} - ${chatName}: ${msg.body} (from ${sender})`
+  );
 
   // Routing commands to their handlers
   switch (command) {
