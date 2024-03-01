@@ -25,7 +25,7 @@ async function processCommands(msg, sender, info, client) {
   ensureUserStore(sender);
   const command = msg.body.split(" ")[0];
   const args = msg.body.substring(command.length).trim();
-  const contact = await whatsappClient.getContactById(msg.from);
+  const contact = await client.getContactById(msg.from);
 
   if (listeningChats[msg.id.remote] && command !== "/!stoplistening") {
     listeningChats[msg.id.remote].push(
