@@ -44,7 +44,9 @@ async function processCommands(msg, sender, info, client) {
   const chat = await client.getChatById(msg.id.remote);
   const chatName = chat.isGroup ? chat.name : contact.pushname ?? sender;
   console.log(
-    `${new Date().toLocaleString()} - ${chatName}: ${msg.body} (from ${sender})`
+    `${new Date().toLocaleString()} | ${chatName}: ${msg.body} (from ${
+      contact.pushname ?? sender
+    })`
   );
 
   // Routing commands to their handlers
