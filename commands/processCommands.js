@@ -44,7 +44,7 @@ async function processCommands(msg, sender, info, client) {
   // Routing commands to their handlers
   switch (command) {
     case "/!kerjaan":
-      handleTaskManagement(msg, args);
+      handleTaskManagement(msg, sender, args);
       break;
     case "/!pengeluaran":
       handleExpenseTracking(msg, sender, args);

@@ -1,6 +1,6 @@
 const { store, saveData } = require("../utils/dataUtils");
 
-async function handleTaskManagement(msg, args) {
+async function handleTaskManagement(msg, sender, args) {
   if (args.startsWith("add ")) {
     const task = args.replace("add ", "");
     store[sender].tasks.push(task);
