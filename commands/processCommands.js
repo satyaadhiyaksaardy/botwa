@@ -39,7 +39,7 @@ async function processCommands(msg, sender, info, client) {
     if (msg.from === "status@broadcast") return;
   }
 
-  console.log("COMMAND", command, "ARGS", args);
+  console.log("Sender", sender + ":", msg.body);
 
   // Routing commands to their handlers
   switch (command) {
