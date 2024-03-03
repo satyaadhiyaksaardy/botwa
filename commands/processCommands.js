@@ -45,7 +45,7 @@ async function processCommands(msg, sender, info, client) {
   const chatName = chat.isGroup ? chat.name : contact.pushname ?? sender;
   console.log(
     `${new Date().toLocaleString()} | ${chatName}: ${msg.body} (from ${
-      chat.isGroup ? contact.pushname : sender
+      contact.pushname ?? sender
     })`
   );
 
